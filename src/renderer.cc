@@ -167,13 +167,13 @@ const char *g_filename = NULL;
 
 int main(int argc, char *argv[])
 {
+	bool dummy;
 #ifdef USE_TBB
     tbb::task_scheduler_init init;
 #endif
 #ifdef _WIN32
     string reportFile = "";
 #endif
-
     RenderMode mode = RENDER_PHONG_SOFTSHADOWMAPS;
     bool doReports = false;
     bool doBenchmark = false;
@@ -271,7 +271,7 @@ int main(int argc, char *argv[])
 	const coord LightDistanceFactor = 4.0;
 
 	// Just the distance to initially place the camera
-	const coord EyeDistanceFactor = 4.0;
+	const coord EyeDistanceFactor = 5.0; //estava 4
 
 	// Add the light that is rotated with the Q/W keys.
 	auto_ptr<Light> pLight(
@@ -373,6 +373,7 @@ int main(int argc, char *argv[])
 			eye += fromEyeToLookat;
 		    else
 			eye -= fromEyeToLookat;
+
 		}
 		if (keys._isS || keys._isF || keys._isE || keys._isD) {
 		    Vector3 eyeToLookatPoint = lookat;
@@ -555,17 +556,31 @@ int main(int argc, char *argv[])
 		    //     and the raytracing mode is handled just like the other modes.
 		    #ifdef HANDLERAYTRACER
 		    if (!doBenchmark) {
+			bool gouraud = false, raycasting = false;
 			Clock raytraceFrameTime;
-			if (scene.renderRaytracer(sony, canvas, mode==RENDER_RAYTRACE_ANTIALIAS)) {
+			if (scene.renderRaytracer(sony, canvas,raycasting, gouraud, mode==RENDER_RAYTRACE_ANTIALIAS)) {
 			    stringstream msg;
-			    if (mode==RENDER_RAYTRACE_ANTIALIAS) msg << "Anti-aliased r"; else msg << "R";
-			    msg << "aytracing completed in ";
-			    msg << (raytraceFrameTime.readMS()+999)/1000;
+			    if (mode==RENDER_RAYTRACE_ANTIALIAS) msg << "Anti-aliased ";
+			    if(raycasting)
+			    {
+					msg << "Raycasting ";
+				}else{
+					msg << "Raytracing ";
+				}
+			    if(gouraud)
+			    {
+					msg << "with gouraud ";
+				}else{
+					msg << "with phong ";
+				}
+			    msg <<"completed in ";
+			    msg << (double)(raytraceFrameTime.readMS()+999)/1000;
 			    msg << " seconds - hit ESC to return to soft shadowmapping mode...";
 			    SDL_WM_SetCaption(msg.str().c_str(), msg.str().c_str());
 			    while(!keys._isAbort) keys.poll();
 			    while(keys._isAbort) keys.poll();
 			}
+			
 			// Do a normal rendering with soft shadow maps
 			mode = RENDER_PHONG_SOFTSHADOWMAPS;
 			SDL_WM_SetCaption(modes[mode-1], modes[mode-1]);
@@ -574,10 +589,10 @@ int main(int argc, char *argv[])
 			forceRedraw = true;
 			continue;
 		    } else {
-			scene.renderRaytracer(sony, canvas, mode==RENDER_RAYTRACE_ANTIALIAS);
+			scene.renderRaytracer(sony, canvas, dummy, dummy, mode==RENDER_RAYTRACE_ANTIALIAS);
 		    }
 		    #else
-		    scene.renderRaytracer(sony, canvas, mode==RENDER_RAYTRACE_ANTIALIAS);
+		    scene.renderRaytracer(sony, canvas ,dummy, dummy, mode==RENDER_RAYTRACE_ANTIALIAS);
 		    #endif
 		    break;
 		} // end of switch rendering mode

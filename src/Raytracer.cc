@@ -17,6 +17,7 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+
 #include <config.h>
 
 #include <vector>
@@ -45,11 +46,20 @@
 //    RENDER_RAYTRACE_ANTIALIAS
 ///////////////////////////////////////////////
 
+
 /////////////////////////////////
 // Raytracing configuration
 
+//Enable GOURAUD shading
+//#define USE_GOURAUD
+
 // Should we use Phong interpolation of the normal vector?
 #define USE_PHONG_NORMAL
+
+//you can use PHONG shading or GOURAUD, not both
+#ifdef USE_GOURAUD
+	#undef USE_PHONG_NORMAL
+#endif
 
 // What depth to stop reflections and refractions?
 #define MAX_RAY_DEPTH	    3
@@ -73,7 +83,7 @@
 
 //////////////////////////////
 // Enable ambient occlusion?
-//#define AMBIENT_OCCLUSION
+#define AMBIENT_OCCLUSION
 // How many ambient rays to spawn per ray intersection?
 #define AMBIENT_SAMPLES  32
 // How close to check for ambient occlusion?
@@ -82,6 +92,18 @@
 // Maximum allowed depth of BVH
 // Checked at BVH build time, no runtime crash possible, see below
 #define BVH_STACK_SIZE 32
+
+///////////////////////////////////////////////////
+//defines simple raycasting (local lighting model)
+//#define RAY_CASTING_ONLY
+
+//if you use raycasting instead of raytracing you spare some computations
+#ifdef RAY_CASTING_ONLY
+	#undef AMBIENT_OCCLUSION
+	#undef REFLECTIONS
+	#undef REFRACTIONS
+#endif
+
 
 //#define RTCORETEST
 //#ifdef RTCORETEST
@@ -149,24 +171,34 @@ inline bool RayIntersectsBox(const Vector3& originInWorldSpace, const Vector3& r
     return true;
 }
 
-template <bool antialias>
+template <bool antialias, bool initGouraud>
 class RaytraceScanline {
     // Since this class contains only references and has no virtual methods, it (hopefully)
     // doesn't exist in runtime; it is optimized away when RaytraceHorizontalSegment is called.
-    const Scene& scene;
+    /*const */Scene& scene;
     const Camera& eye;
     Screen& canvas;
     int& y;
 public:
     RaytraceScanline(
-	const Scene& scene, const Camera& e, Screen& c,
+	Scene& scene, const Camera& e, Screen& c,
 	int& scanline)
 	:
 	scene(scene),
 	eye(e),
 	canvas(c),
 	y(scanline)
-    {}
+    {
+		if(initGouraud){
+			#ifdef USE_OPENMP
+			#pragma omp parallel for schedule(dynamic,10)
+			#endif
+			for(long i=0;i<scene._triangles.size();i++)
+			{
+					CalculateVerticesColors<true>(i,0,eye);
+			}
+		}		
+	}
 
     // Templated member - offers two compile-time options:
     //
@@ -179,6 +211,7 @@ public:
     //
     // C++ power...
     //
+    
     template <bool stopAtfirstRayHit, bool doCulling>
     bool BVH_IntersectTriangles(
 	// Inputs
@@ -288,7 +321,7 @@ public:
 			    // maintain the closest hit
 			    bestTriDist = hitZ;
 			    pBestTri = &triangle;
-			    pointHitInWorldSpace = hit;
+			    pointHitInWorldSpace = hit; //<<-----------------
 			    kAB = kt1;
 			    kBC = kt2;
 			    kCA = kt3;
@@ -306,36 +339,10 @@ public:
 	    return false;
     }
 
-    // Templated member - offers a single compile-time option, whether we are doing culling or not.
-    // This is used in the recursive call this member makes (!) to enable backface culling for reflection rays,
-    // but disable it for refraction rays.
-    //
-    // Class-nested C++ recursion, provided via templates...
-    template <bool doCulling>
-    Pixel Raytrace(Vector3 originInWorldSpace, Vector3 rayInWorldSpace, const Triangle *avoidSelf, int depth) const
-    {
-	if (depth >= MAX_RAY_DEPTH)
-	    return Pixel(0.,0.,0.);
-
-	const Triangle *pBestTri = NULL;
-	Vector3 pointHitInWorldSpace;
-	coord kAB=0.f, kBC=0.f, kCA=0.f; // distances from the 3 edges of the triangle (from where we hit it)
-
-	// Use the surface-area heuristic based, bounding volume hierarchy of axis-aligned bounding boxes
-	// (keywords: SAH, BVH, AABB)
-	if (!BVH_IntersectTriangles<false,doCulling>(
-		originInWorldSpace, rayInWorldSpace, avoidSelf,
-		pBestTri, pointHitInWorldSpace, kAB, kBC, kCA))
-	    // We pierced no triangle, return with no contribution (ambient is black)
-	    return Pixel(0.,0.,0.);
-
-	// Set this to pass to recursive calls below, so that we don't get self-shadow or self-reflection
-	// from this triangle...
-	avoidSelf = pBestTri;
-
-	// We'll also calculate the color contributed from this intersection
-	// Start from the triangle's color
-	Pixel color = pBestTri->_colorf;
+template <bool doCulling>
+Pixel Rendering (Vector3 originInWorldSpace, Vector3 rayInWorldSpace, const Triangle *avoidSelf, int depth,
+const Triangle *pBestTri,Vector3 pointHitInWorldSpace, coord kAB,coord kBC, coord kCA, Pixel color, Vector3 phongNormal,
+bool gouraud){
 
 #ifdef USE_PHONG_NORMAL
 	// These are the closest triangle's vertices...
@@ -376,10 +383,9 @@ public:
 	Vector3 phongNormalC = bestTriNrmC; phongNormalC *= ABx / area;
 
 	// and finally, accumulate the three contributions and normalize.
-	Vector3 phongNormal = phongNormalA + phongNormalB + phongNormalC;
+	phongNormal = phongNormalA + phongNormalB + phongNormalC;
 	phongNormal.normalize();
-#else
-	const Vector3& phongNormal = pBestTri->_normal;
+
 #endif
 
 #ifdef AMBIENT_OCCLUSION
@@ -533,11 +539,11 @@ public:
 	refractedRay.normalize();
 #endif // REFRACTIONS
 
-	return
+	Pixel returnPixel =
 	    color
 #ifdef REFLECTIONS
 	    /* use backface culling for reflection rays: <true> */
-	    + Raytrace<true>(originInWorldSpace, reflectedRay, avoidSelf, depth+1) * REFLECTIONS_RATE
+	    + Raytrace<true>(originInWorldSpace, reflectedRay, avoidSelf, depth+1, gouraud) * REFLECTIONS_RATE
 #endif
 #ifdef REFRACTIONS
 	    /* Makes chessboard look much better
@@ -546,24 +552,113 @@ public:
 		Raytrace<false>(originInWorldSpace, refractedRay, avoidSelf, depth+1) * REFRACTIONS_RATE) */
 
 	    /* dont use backface culling for refraction rays: <false> */
-	    + Raytrace<false>(originInWorldSpace, refractedRay, avoidSelf, depth+1) * REFRACTIONS_RATE
+	    + Raytrace<false>(originInWorldSpace, refractedRay, avoidSelf, depth+1, gouraud) * REFRACTIONS_RATE
 #endif
 	    ;
+
+	return returnPixel;
+
+}
+
+    // Templated member - offers a single compile-time option, whether we are doing culling or not.
+    // This is used in the recursive call this member makes (!) to enable backface culling for reflection rays,
+    // but disable it for refraction rays.
+    //
+    // Class-nested C++ recursion, provided via templates...
+    template <bool doCulling>
+    Pixel Raytrace(Vector3 originInWorldSpace, Vector3 rayInWorldSpace, const Triangle *avoidSelf, int depth, bool gouraud) /*const*/
+    {
+
+	if (depth >= MAX_RAY_DEPTH)
+	    return Pixel(0.,0.,0.);
+
+	const Triangle *pBestTri = NULL;
+	Vector3 pointHitInWorldSpace;
+	coord kAB=0.f, kBC=0.f, kCA=0.f; // distances from the 3 edges of the triangle (from where we hit it)
+
+	// Use the surface-area heuristic based, bounding volume hierarchy of axis-aligned bounding boxes
+	// (keywords: SAH, BVH, AABB)
+	if (!BVH_IntersectTriangles<false,doCulling>(
+		originInWorldSpace, rayInWorldSpace, avoidSelf,
+		pBestTri, pointHitInWorldSpace, kAB, kBC, kCA))
+	    // We pierced no triangle, return with no contribution (ambient is black)
+	    return Pixel(0.,0.,0.);
+
+	// Set this to pass to recursive calls below, so that we don't get self-shadow or self-reflection
+	// from this triangle...
+	avoidSelf = pBestTri;
+
+	// We'll also calculate the color contributed from this intersection
+	// Start from the triangle's color
+	Pixel color = pBestTri->_colorf;
+
+	Vector3 phongNormal = pBestTri->_normal;
+
+if (gouraud){
+
+	Vector3 fromTriToOrigin = originInWorldSpace;
+	fromTriToOrigin -= pBestTri->_center;
+
+	//invisible triangle
+	if(dot(fromTriToOrigin, pBestTri->_normal)<0){
+			return Pixel(0,0,0);
+	}
+
+	Pixel v1,v2, v3;
+	Vector3 pointHitInWorldSpace2;
+
+		v1 = pBestTri->_verticesColor[0];
+		v2 = pBestTri->_verticesColor[1];
+		v3 = pBestTri->_verticesColor[2];
+
+		Pixel pixelColorA = v1;
+		Pixel pixelColorB = v2;
+		Pixel pixelColorC = v3;
+
+		// These are the closest triangle's vertices...
+		const Vector3& bestTriA = *pBestTri->_vertexA;
+		const Vector3& bestTriB = *pBestTri->_vertexB;
+		const Vector3& bestTriC = *pBestTri->_vertexC;
+
+		Vector3 AB = bestTriB; AB-= bestTriA;  // edge AB
+		Vector3 BC = bestTriC; BC-= bestTriB;  // edge BC
+		Vector3 crossAB_BC = cross(AB, BC);
+		coord area = crossAB_BC.length();      // 2*area(ABC)
+
+		// And these are the three sub-triangles - kAB,kBC,kCA were found above...
+		coord ABx = kAB*distance(bestTriA, bestTriB);
+		coord BCx = kBC*distance(bestTriB, bestTriC);
+		coord CAx = kCA*distance(bestTriC, bestTriA);
+
+		Pixel phongCA = pixelColorA; phongCA *= BCx / area;
+		Pixel phongCB = pixelColorB; phongCB *= CAx / area;
+		Pixel phongCC = pixelColorC; phongCC *= ABx / area;
+
+		// acumulate colors
+		Pixel finalColor = phongCA + phongCB + phongCC;
+
+		return finalColor;
+}		 
+
+		return Rendering<doCulling>(originInWorldSpace,rayInWorldSpace,avoidSelf,depth,pBestTri,pointHitInWorldSpace,
+		kAB,kBC,kCA,color,phongNormal,false);
     }
 
-    void RaytraceHorizontalSegment(int xStarting, int iOnePastEndingX) const
+    void RaytraceHorizontalSegment(int xStarting, int iOnePastEndingX) /*const*/
     {
 #ifdef USE_OPENMP
 	#pragma omp parallel for schedule(dynamic,10)
 #endif
 	for(int x=xStarting; x<iOnePastEndingX; x++) {
+		
 	    Pixel finalColor(0,0,0);
 
+		//number of rays per pixel
 	    int pixelsTraced = 1;
 	    if (antialias)
-		pixelsTraced = 4;
+			pixelsTraced = 4;
 
-	    while(pixelsTraced--) {
+	    while(pixelsTraced--) { 
 		// We will shoot a ray in camera space (from Eye to the screen point, so in camera
 		// space, from (0,0,0) to this:
 		coord xx = (coord)x;
@@ -592,13 +687,19 @@ public:
 		rayInWorldSpace.normalize();
 
 		// Primary ray, we want backface culling: <true>
-		finalColor += Raytrace<true>(originInWorldSpace, rayInWorldSpace, NULL, 0);
+		#ifdef USE_GOURAUD
+			finalColor += Raytrace<true>(originInWorldSpace, rayInWorldSpace, NULL, 0, true);
+		#else
+			finalColor += Raytrace<true>(originInWorldSpace, rayInWorldSpace, NULL, 0, false);
+		#endif
 	    }
 	    if (antialias)
 		finalColor /= 4.;
+	    //r,g,b cannot be greater than 255
 	    if (finalColor._r>255.0f) finalColor._r=255.0f;
 	    if (finalColor._g>255.0f) finalColor._g=255.0f;
 	    if (finalColor._b>255.0f) finalColor._b=255.0f;
+	    //print a pixel on screen
 	    canvas.DrawPixel(y,x, SDL_MapRGB(
 		canvas._surface->format, (Uint8)finalColor._r, (Uint8)finalColor._g, (Uint8)finalColor._b));
 	}
@@ -610,6 +711,84 @@ public:
 	RaytraceHorizontalSegment(r.begin(), r.end());
     }
 #endif
+
+	//Computes the color for each vertex of the triangles array
+	template <bool doCulling>
+	void CalculateVerticesColors(long i, int depth, const Camera& eye)
+	{
+
+		const Triangle& triangle = scene._triangles[i];
+		const Triangle *pBestTri = NULL;
+		pBestTri = &triangle;
+		const Triangle *avoidSelf;
+		avoidSelf = pBestTri;
+		Vector3 rayInWorldSpace;
+		avoidSelf = pBestTri;
+		Pixel color = pBestTri->_colorf;
+		Vector3 phongNormal = pBestTri->_normal;
+		Pixel v1,v2, v3;
+
+		Vector3 fromTriToOrigin = eye;
+		fromTriToOrigin -= pBestTri->_center;
+		
+		const Triangle * dummy;
+		coord kAB,kBC,kCA;
+		Vector3 temp;
+
+		//verify if the triangle is invisible
+		if (dot(fromTriToOrigin, triangle._normal)<0)
+		{
+				scene._triangles[i]._verticesColor[0] = Pixel(0,0,0);
+				scene._triangles[i]._verticesColor[1] = Pixel(0,0,0);
+				scene._triangles[i]._verticesColor[2] = Pixel(0,0,0);
+				return;
+		}
+
+		//Do the Rendering for each vertex of the triangle (_vertexA, _vertexB, _vertexC)
+		{
+			phongNormal = pBestTri->_vertexA->_normal;
+			
+			kAB = dot(pBestTri->_e1,*(pBestTri->_vertexA)) - pBestTri->_d1;
+			kBC = dot(pBestTri->_e2,*(pBestTri->_vertexA)) - pBestTri->_d2;
+			kCA = dot(pBestTri->_e3,*(pBestTri->_vertexA)) - pBestTri->_d3;
+
+			rayInWorldSpace = *(pBestTri->_vertexA);
+			rayInWorldSpace -= eye;
+			
+			scene._triangles[i]._verticesColor[0] = Rendering<doCulling>
+			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexA),kAB,kBC,kCA,color,phongNormal,false);	
+		}
+		{
+			phongNormal = pBestTri->_vertexB->_normal;
+
+			kAB = dot(pBestTri->_e1,*(pBestTri->_vertexB)) - pBestTri->_d1;
+			kBC = dot(pBestTri->_e2,*(pBestTri->_vertexB)) - pBestTri->_d2;
+			kCA = dot(pBestTri->_e3,*(pBestTri->_vertexB)) - pBestTri->_d3;
+			
+			rayInWorldSpace = *(pBestTri->_vertexB);
+			rayInWorldSpace -= eye;
+					
+			scene._triangles[i]._verticesColor[1] = Rendering<doCulling>
+			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexB), kAB,kBC,kCA,color,phongNormal,false);
+		}
+		{
+			phongNormal = pBestTri->_vertexC->_normal;
+
+			kAB = dot(pBestTri->_e1,*(pBestTri->_vertexC)) - pBestTri->_d1;
+			kBC = dot(pBestTri->_e2,*(pBestTri->_vertexC)) - pBestTri->_d2;
+			kCA = dot(pBestTri->_e3,*(pBestTri->_vertexC)) - pBestTri->_d3;
+			
+			rayInWorldSpace = *(pBestTri->_vertexC);
+			rayInWorldSpace -= eye;
+		
+			scene._triangles[i]._verticesColor[2] = Rendering<doCulling>
+			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexC), kAB,kBC,kCA,color,phongNormal,false);
+		}
+    }
+    
+    Scene getScene(){
+		return scene;
+	}	
 };
 
 int CountBoxes(BVHNode *root)
@@ -672,6 +851,10 @@ void Scene::PopulateCacheFriendlyBVH(
 	    _triIndexList[idxTriList++] = *it - pFirstTriangle;
 	}
     }
+}
+
+void Scene::insertTriangle(Triangle t, long int idx) /*const*/ {
+    _triangles.insert(_triangles.begin()+idx+1,t);
 }
 
 void Scene::CreateCFBVH()
@@ -777,29 +960,57 @@ void Scene::UpdateBoundingVolumeHierarchy(const char *filename, bool forceRecalc
     }
 }
 
-bool Scene::renderRaytracer(Camera& eye, Screen& canvas, bool antialias)
+bool Scene::renderRaytracer(Camera& eye, Screen& canvas, bool& raycasting, bool& gouraud, bool antialias)
 {
+	
+	#ifdef RAY_CASTING_ONLY
+		raycasting = true;
+	#endif
+	
+	#ifdef USE_GOURAUD
+		gouraud = true;
+	#endif
+	
     bool needToUpdateTitleBar = !_pSceneBVH; // see below
 
     // Update the BVH and its cache-friendly version
     extern const char *g_filename;
     UpdateBoundingVolumeHierarchy(g_filename);
-
     if (needToUpdateTitleBar) {
 	// A BVH calculation just occured, the title bar is still saying:
 	//    "Creating Bounding Volume Hierarchy data... (SAH/AABB)"
 	// Update it, we are now raytracing...
 	const char *modeMsg;
 	if (antialias)
-	    modeMsg = "Raytracing with antialiasing";
+		#ifdef RAY_CASTING_ONLY
+			modeMsg = "Raycasting with antialiasing";
+		#else
+			modeMsg = "Raytracing with antialiasing";
+	    #endif
 	else
-	    modeMsg = "Raytracing";
+		#ifdef RAY_CASTING_ONLY
+			modeMsg = "Raycasting";
+		#else
+			modeMsg = "Raytracing";
+	    #endif
 	SDL_WM_SetCaption(modeMsg, modeMsg);
     }
 
     Keyboard keys;
 
-    // Main loop: for each pixel...
+	Scene scene;
+#ifdef USE_GOURAUD
+	int dummy=0;
+    // Set colors for vertices
+    if (antialias)
+		scene = RaytraceScanline<true,true>(*this, eye, canvas, dummy).getScene();
+	else
+		scene = RaytraceScanline<false,true>(*this, eye, canvas, dummy).getScene();
+#else
+	scene = *this;
+#endif
+
+    // Main loop: for each pixel... 
     for(int y=0; y<HEIGHT; y++) {
 #ifdef USE_TBB
 	// For TBB, use the parallel_for construct.
@@ -811,19 +1022,20 @@ bool Scene::renderRaytracer(Camera& eye, Screen& canvas, bool antialias)
 	if (antialias)
 	    tbb::parallel_for(
 		tbb::blocked_range<size_t>(0, WIDTH, 10),
-		RaytraceScanline<true>(*this, eye, canvas, y) );
+		RaytraceScanline<true,false>(scene, eye, canvas, y) );
 	else
 	    tbb::parallel_for(
 		tbb::blocked_range<size_t>(0, WIDTH, 10),
-		RaytraceScanline<false>(*this, eye, canvas, y) );
+		RaytraceScanline<false,false>(scene, eye, canvas, y) );
 #else
 	// For both OpenMP and single-threaded, call the RaytraceHorizontalSegment member
 	// of the RaytraceScanline, requesting drawing of ALL the scanline.
 	// For OpenMP, the appropriate pragma inside RaytraceHorizontalSegment will make it execute via SMP...
-	if (antialias)
-	    RaytraceScanline<true>(*this, eye, canvas, y).RaytraceHorizontalSegment(0, WIDTH);
-	else
-	    RaytraceScanline<false>(*this, eye, canvas, y).RaytraceHorizontalSegment(0, WIDTH);
+	if (antialias){
+	    RaytraceScanline<true,false>(scene, eye, canvas, y).RaytraceHorizontalSegment(0, WIDTH);
+	}else{
+	    RaytraceScanline<false,false>(scene, eye, canvas, y).RaytraceHorizontalSegment(0, WIDTH);
+	}
 #endif
 
 #ifdef HANDLERAYTRACER

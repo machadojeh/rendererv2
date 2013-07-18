@@ -82,7 +82,9 @@ struct Scene {
     void renderPhongAndSoftShadowed(const Camera&, Screen&);
 
     // Since it may be aborted for taking too long, this returns "boolCompletedOK"
-    bool renderRaytracer(Camera&, Screen&, bool antiAlias = false);
+    bool renderRaytracer(Camera&, Screen&, bool&, bool& ,bool antiAlias = false);
+
+    void insertTriangle(Triangle t, long int idx)/* const */;
 };
 
 #endif

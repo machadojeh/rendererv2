@@ -53,3 +53,6 @@ Triangle::Triangle(
 	_normal = triNormal;
     }
 }
+
+Triangle::Triangle(){
+}

@@ -57,12 +57,18 @@ struct Triangle
     Vector3 _bottom;
     Vector3 _top;
 
+	//colors of the three vertices of the triangle
+    Pixel _verticesColor[3]; 
+	
+
     Triangle(
 	const Vertex *vertexA,
 	const Vertex *vertexB,
 	const Vertex *vertexC,
 	unsigned r, unsigned g, unsigned b,
 	bool twosided = false, bool triNormalProvided=false, Vector3 triNormal=Vector3(0.,0.,0.) );
+
+    Triangle();
 };
 
 #endif
