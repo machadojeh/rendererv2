@@ -275,3 +275,18 @@ Enjoy!
 Thanassis Tsiodras, Dr.-Ing.
 
 ttsiodras_at-no-spam_thanks-gmail_dot-com
+
+## Ray Casting and Gouraud
+
+If you want to see the result for Ray Casting (a simplification of Ray 
+Tracing) go to src/Raytracer.cc and uncomment the line 
+//#define RAY_CASTING_ONLY. The default mode uses Ray Tracing.
+
+To use the Gouraud shading with Ray Tracing/ Ray Casting instead of Phong shading, just uncomment the line //#define USE_GOURAUD.
+
+Be sure to run afterwards
+        make
+
+These features are not available for Windows.
+
+Jessica Machado
