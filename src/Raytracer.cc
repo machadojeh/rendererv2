@@ -52,7 +52,7 @@
 // Raytracing configuration
 
 //Enable GOURAUD shading
-#define USE_GOURAUD
+//#define USE_GOURAUD
 
 // Should we use Phong interpolation of the normal vector?
 #define USE_PHONG_NORMAL
