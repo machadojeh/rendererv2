@@ -54,5 +54,37 @@ Triangle::Triangle(
     }
 }
 
+Triangle::Triangle(
+    const Vertex *vertexA,
+    const Vertex *vertexB,
+    const Vertex *vertexC,
+    unsigned idx1, unsigned idx2, unsigned idx3,
+    unsigned r, unsigned g, unsigned b,
+    bool twosided, bool triNormalProvided, Vector3 triNormal)
+    :
+    _vertexA(vertexA), _vertexB(vertexB), _vertexC(vertexC),
+    _idx1(idx1), _idx2(idx2), _idx3(idx3),
+
+    _center((vertexA->_x + vertexB->_x + vertexC->_x)/3.0f,
+	    (vertexA->_y + vertexB->_y + vertexC->_y)/3.0f,
+	    (vertexA->_z + vertexB->_z + vertexC->_z)/3.0f),
+
+    _colorf((float)r,(float)g,(float)b), // For use in all other cases
+    _color(SDL_MapRGB(Screen::_surface->format, r,g,b)), // For use with DrawPixel
+    _twoSided(twosided),
+    _bottom(FLT_MAX,FLT_MAX,FLT_MAX), // Will be updated after centering in Loader
+    _top(-FLT_MAX,-FLT_MAX,-FLT_MAX) // Will be updated after centering in Loader
+{
+    if (!triNormalProvided) {
+	_normal = Vector3(
+	    (vertexA->_normal._x + vertexB->_normal._x + vertexC->_normal._x)/3.0f,
+	    (vertexA->_normal._y + vertexB->_normal._y + vertexC->_normal._y)/3.0f,
+	    (vertexA->_normal._z + vertexB->_normal._z + vertexC->_normal._z)/3.0f);
+	_normal.normalize();
+    } else {
+	_normal = triNormal;
+    }
+}
+
 Triangle::Triangle(){
 }

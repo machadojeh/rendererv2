@@ -23,6 +23,7 @@
 #include <vector>
 #include <sstream>
 #include <cfloat>
+#include <time.h> 
 
 #ifdef USE_TBB
 #include "tbb/blocked_range.h"
@@ -51,7 +52,7 @@
 // Raytracing configuration
 
 //Enable GOURAUD shading
-//#define USE_GOURAUD
+#define USE_GOURAUD
 
 // Should we use Phong interpolation of the normal vector?
 #define USE_PHONG_NORMAL
@@ -190,13 +191,18 @@ public:
 	y(scanline)
     {
 		if(initGouraud){
+			
+			Clock PreprocessTime;
+			
 			#ifdef USE_OPENMP
 			#pragma omp parallel for schedule(dynamic,10)
-			#endif
+			#endif			
 			for(long i=0;i<scene._triangles.size();i++)
 			{
-					CalculateVerticesColors<true>(i,0,eye);
+				CalculateVerticesColors<true>(i,0,eye);
 			}
+			
+			std::cout<<"time for pixel shading: "<<(double)(PreprocessTime.readMS()+999)/1000<<std::endl;
 		}		
 	}
 
@@ -607,9 +613,14 @@ if (gouraud){
 	Pixel v1,v2, v3;
 	Vector3 pointHitInWorldSpace2;
 
+		v1 = scene._verticesColor[pBestTri->_idx1];
+		v2 = scene._verticesColor[pBestTri->_idx2];
+		v3 = scene._verticesColor[pBestTri->_idx3];
+		/*
 		v1 = pBestTri->_verticesColor[0];
 		v2 = pBestTri->_verticesColor[1];
 		v3 = pBestTri->_verticesColor[2];
+		*/
 
 		Pixel pixelColorA = v1;
 		Pixel pixelColorB = v2;
@@ -703,6 +714,7 @@ if (gouraud){
 	    canvas.DrawPixel(y,x, SDL_MapRGB(
 		canvas._surface->format, (Uint8)finalColor._r, (Uint8)finalColor._g, (Uint8)finalColor._b));
 	}
+	
     }
 
 #ifdef USE_TBB
@@ -734,20 +746,18 @@ if (gouraud){
 		const Triangle * dummy;
 		coord kAB,kBC,kCA;
 		Vector3 temp;
-
-		//verify if the triangle is invisible
+		
+		//if the triangle is invisible ignore it
 		if (dot(fromTriToOrigin, triangle._normal)<0)
 		{
-				scene._triangles[i]._verticesColor[0] = Pixel(0,0,0);
-				scene._triangles[i]._verticesColor[1] = Pixel(0,0,0);
-				scene._triangles[i]._verticesColor[2] = Pixel(0,0,0);
-				return;
+			return;
 		}
 
 		//Do the Rendering for each vertex of the triangle (_vertexA, _vertexB, _vertexC)
-		{
+		if(scene._verticesColor[scene._triangles[i]._idx1]._r == -1)
+		{			
 			phongNormal = pBestTri->_vertexA->_normal;
-			
+
 			kAB = dot(pBestTri->_e1,*(pBestTri->_vertexA)) - pBestTri->_d1;
 			kBC = dot(pBestTri->_e2,*(pBestTri->_vertexA)) - pBestTri->_d2;
 			kCA = dot(pBestTri->_e3,*(pBestTri->_vertexA)) - pBestTri->_d3;
@@ -755,9 +765,11 @@ if (gouraud){
 			rayInWorldSpace = *(pBestTri->_vertexA);
 			rayInWorldSpace -= eye;
 			
-			scene._triangles[i]._verticesColor[0] = Rendering<doCulling>
-			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexA),kAB,kBC,kCA,color,phongNormal,false);	
+			scene._verticesColor[scene._triangles[i]._idx1] = Rendering<doCulling>
+			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexA),kAB,kBC,kCA,color,phongNormal,false);
 		}
+		
+		if(scene._verticesColor[scene._triangles[i]._idx2]._r == -1)
 		{
 			phongNormal = pBestTri->_vertexB->_normal;
 
@@ -767,10 +779,12 @@ if (gouraud){
 			
 			rayInWorldSpace = *(pBestTri->_vertexB);
 			rayInWorldSpace -= eye;
-					
-			scene._triangles[i]._verticesColor[1] = Rendering<doCulling>
+			
+			scene._verticesColor[scene._triangles[i]._idx2] = Rendering<doCulling>
 			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexB), kAB,kBC,kCA,color,phongNormal,false);
 		}
+		
+		if(scene._verticesColor[scene._triangles[i]._idx3]._r == -1)
 		{
 			phongNormal = pBestTri->_vertexC->_normal;
 
@@ -780,8 +794,8 @@ if (gouraud){
 			
 			rayInWorldSpace = *(pBestTri->_vertexC);
 			rayInWorldSpace -= eye;
-		
-			scene._triangles[i]._verticesColor[2] = Rendering<doCulling>
+			
+			scene._verticesColor[scene._triangles[i]._idx3] = Rendering<doCulling>
 			(eye,rayInWorldSpace,avoidSelf,depth,pBestTri,*(pBestTri->_vertexC), kAB,kBC,kCA,color,phongNormal,false);
 		}
     }
@@ -1001,11 +1015,7 @@ bool Scene::renderRaytracer(Camera& eye, Screen& canvas, bool& raycasting, bool&
 	Scene scene;
 #ifdef USE_GOURAUD
 	int dummy=0;
-    // Set colors for vertices
-    if (antialias)
-		scene = RaytraceScanline<true,true>(*this, eye, canvas, dummy).getScene();
-	else
-		scene = RaytraceScanline<false,true>(*this, eye, canvas, dummy).getScene();
+	scene = RaytraceScanline<true,true>(*this, eye, canvas, dummy).getScene();
 #else
 	scene = *this;
 #endif
@@ -1036,6 +1046,7 @@ bool Scene::renderRaytracer(Camera& eye, Screen& canvas, bool& raycasting, bool&
 	}else{
 	    RaytraceScanline<false,false>(scene, eye, canvas, y).RaytraceHorizontalSegment(0, WIDTH);
 	}
+	
 #endif
 
 #ifdef HANDLERAYTRACER
@@ -1063,5 +1074,17 @@ bool Scene::renderRaytracer(Camera& eye, Screen& canvas, bool& raycasting, bool&
 #endif
     }
     canvas.ShowScreen(true,true);
+    
+#ifdef USE_GOURAUD
+	int cont = 0;
+	for(int i=0;i<_verticesColor.size();i++){
+		if(_verticesColor[i]._r != -1)
+		cont++;
+		_verticesColor[i]._r = -1; 
+	}
+	
+	std::cout<<"Vertices visiveis: "<<cont<<std::endl; 
+#endif	
+    
     return true;
 }

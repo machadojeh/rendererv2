@@ -56,10 +56,9 @@ struct Triangle
     Vector3 _e1, _e2, _e3;
     Vector3 _bottom;
     Vector3 _top;
-
-	//colors of the three vertices of the triangle
-    Pixel _verticesColor[3]; 
 	
+	//indexes of vertices on vertexes array of scene
+	unsigned _idx1, _idx2, _idx3;
 
     Triangle(
 	const Vertex *vertexA,
@@ -67,6 +66,14 @@ struct Triangle
 	const Vertex *vertexC,
 	unsigned r, unsigned g, unsigned b,
 	bool twosided = false, bool triNormalProvided=false, Vector3 triNormal=Vector3(0.,0.,0.) );
+	
+    Triangle(
+	const Vertex *vertexA,
+	const Vertex *vertexB,
+	const Vertex *vertexC,
+	unsigned idx1, unsigned idx2, unsigned idx3,
+	unsigned r, unsigned g, unsigned b,
+	bool twosided = false, bool triNormalProvided=false, Vector3 triNormal=Vector3(0.,0.,0.));
 
     Triangle();
 };

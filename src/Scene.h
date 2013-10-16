@@ -33,6 +33,7 @@ struct Scene {
     static const coord MaxCoordAfterRescale;
 
     std::vector<Vertex>    _vertices;
+    std::vector<Pixel>	   _verticesColor;
     std::vector<Triangle>  _triangles;
     std::vector<Light*>	   _lights;
 

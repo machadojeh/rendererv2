@@ -84,9 +84,16 @@ void Scene::load(const char *filename)
         _vertices.push_back(Vertex( 0.5,  0.5, 0.,  0.,0.,1.));
         _vertices.push_back(Vertex(-0.5,  0.5, 0.,  0.,0.,1.));
         _vertices.push_back(Vertex(-0.5, -0.5, 0.,  0.,0.,1.));
+        
+        _verticesColor.push_back(Pixel(-1));
+        _verticesColor.push_back(Pixel(-1));
+        _verticesColor.push_back(Pixel(-1));
+        _verticesColor.push_back(Pixel(-1));
+        _verticesColor.push_back(Pixel(-1));
+        
         _triangles.reserve(2);
-        _triangles.push_back(Triangle(&_vertices[0], &_vertices[1], &_vertices[2], 255,0,0));
-        _triangles.push_back(Triangle(&_vertices[0], &_vertices[2], &_vertices[3], 255,0,0));
+        _triangles.push_back(Triangle(&_vertices[0], &_vertices[1], &_vertices[2], 0, 1, 2, 255,0,0));
+        _triangles.push_back(Triangle(&_vertices[0], &_vertices[2], &_vertices[3], 0, 2, 3, 255,0,0));
         return;
 
     }
@@ -175,6 +182,7 @@ void Scene::load(const char *filename)
                     }
                     assert(_vertices.size() < _vertices.capacity());
                     _vertices.push_back(Vertex(x,y,z, nx,ny,nz));
+                    _verticesColor.push_back(Pixel(-1));
                 }
 
                 Uint32 noOfTris;
@@ -203,6 +211,7 @@ void Scene::load(const char *filename)
                     _triangles.push_back(
                         Triangle(
                             &_vertices[idx1], &_vertices[idx2], &_vertices[idx3],
+                            idx1, idx2, idx3,
                             unsigned(r),unsigned(g),unsigned(b)));
                 }
 
@@ -240,6 +249,7 @@ void Scene::load(const char *filename)
                 float nx=0.,ny=0.,nz=0.;
                 assert(_vertices.size() < _vertices.capacity());
                 _vertices.push_back(Vertex(x,y,z, nx,ny,nz));
+                _verticesColor.push_back(Pixel(-1));
             }
 
             for(Uint32 i=0; i<totalTriangles; i++) {
@@ -262,6 +272,7 @@ void Scene::load(const char *filename)
                 _triangles.push_back(
                     Triangle(
                         &_vertices[idx1], &_vertices[idx2], &_vertices[idx3],
+                        idx1, idx2, idx3,
                         unsigned(r),unsigned(g),unsigned(b)));
             }
             fclose(fp);
@@ -326,6 +337,7 @@ void Scene::load(const char *filename)
                                 nr._x,
                                 nr._y,
                                 nr._z));
+                        _verticesColor.push_back(Pixel(-1));
                     }
                     assert(_triangles.size() < _triangles.capacity());
                     _triangles.push_back(
@@ -333,6 +345,7 @@ void Scene::load(const char *filename)
                             &_vertices[currentTotalPoints + 3*i],
                             &_vertices[currentTotalPoints + 3*i + 1],
                             &_vertices[currentTotalPoints + 3*i + 2],
+                            currentTotalPoints + 3*i, currentTotalPoints + 3*i + 1, currentTotalPoints + 3*i + 2,
                             r, g, b,
                             pMat->second._twoSided,
                             true,
@@ -378,6 +391,9 @@ void Scene::load(const char *filename)
                         std::istringstream str(line);
                         str >> x >> y >> z >> ambientOcclusionCoeff;
                         _vertices.push_back(Vertex(x,y,z,0.,0.,0.,ambientOcclusionCoeff));
+                        
+                        _verticesColor.push_back(Pixel(-1));
+                        
                     } else if (totalTriangles) {
                         totalTriangles--;
                         unsigned dummy, idx1, idx2, idx3;
@@ -393,7 +409,8 @@ void Scene::load(const char *filename)
                             _triangles.push_back(
                                 Triangle(
                                     &_vertices[idx1], &_vertices[idx2], &_vertices[idx3],
-                                    r, g, b));
+                                    idx1, idx2, idx3,
+									r, g, b));
                         }
                     }
                 }
